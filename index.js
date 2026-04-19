@@ -5,86 +5,77 @@ const express = require('express');
 const app = express();
 puppeteer.use(StealthPlugin());
 
-// Root URL check karne ke liye
-app.get('/', (req, res) => {
-    res.send('Google Trends API is Live! Use /trends?geo=IN');
-});
+app.get('/', (req, res) => res.send('API is Ready! Add /trends?geo=IN to URL'));
 
 app.get('/trends', async (req, res) => {
     const geo = req.query.geo || 'US';
     const url = `https://trends.google.co.in/trending?geo=${geo}&hours=4&status=active&sort=search-volume`;
 
-    console.log(`Fetching trends for: ${geo}`);
-
+    // Sabse pehle browser launch karein lekin minimalist settings ke saath
     const browser = await puppeteer.launch({
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
-            '--single-process'
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu'
         ],
-        // Docker environment ka path
-        executablePath: '/usr/bin/google-chrome-stable', 
+        executablePath: '/usr/bin/google-chrome-stable',
         headless: "new"
     });
 
     try {
         const page = await browser.newPage();
         
-        // Anti-detection
+        // Timeout ko badha dete hain (Render slow hai)
+        page.setDefaultNavigationTimeout(90000); 
+
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36');
 
-        // Resources block karke speed badhayein
+        // Rule: Sab kuch block kar do jo zaroori nahi hai
         await page.setRequestInterception(true);
-        page.on('request', (request) => {
-            if (['image', 'stylesheet', 'font'].includes(request.resourceType())) {
-                request.abort();
+        page.on('request', (req) => {
+            if (['image', 'stylesheet', 'font', 'media', 'other'].includes(req.resourceType())) {
+                req.abort();
             } else {
-                request.continue();
+                req.continue();
             }
         });
 
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+        // "networkidle2" ki jagah "domcontentloaded" use karenge (Fast hai)
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
 
-        // Google Trends scraping logic
+        // Wait for data to load (Google Trends takes time)
+        await new Promise(r => setTimeout(r, 5000)); 
+
         const trendingData = await page.evaluate(() => {
-            const rows = document.querySelectorAll('tr'); // Google Trends row
-            const results = [];
+            // Google Trends Table structure check karein
+            const items = [];
+            const rows = document.querySelectorAll('tr'); 
             
-            rows.forEach((row) => {
+            rows.forEach(row => {
                 const title = row.querySelector('.mZ37Wc-title')?.innerText;
                 const volume = row.querySelector('.mZ37Wc-search-count')?.innerText;
                 const queries = row.querySelector('.mZ37Wc-related-queries')?.innerText;
                 
                 if (title) {
-                    results.push({
-                        title: title,
-                        search_volume: volume,
-                        related_queries: queries,
-                        timestamp: new Date().toISOString()
-                    });
+                    items.push({ title, volume, queries });
                 }
             });
-            return results;
+            return items;
         });
 
-        res.json({
-            status: "success",
-            geo: geo,
-            count: trendingData.length,
-            results: trendingData
-        });
+        res.json({ success: true, geo, count: trendingData.length, results: trendingData });
 
     } catch (error) {
-        console.error("Scraping Error:", error.message);
-        res.status(500).json({ status: "failed", error: error.message });
+        res.status(500).json({ success: false, error: error.message });
     } finally {
         await browser.close();
     }
 });
 
-// Render's default port 10000
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
