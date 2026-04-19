@@ -5,13 +5,15 @@ const app = express();
 
 puppeteer.use(StealthPlugin());
 
-app.get('/trends', async (req, res) => {
-    const geo = req.query.geo || 'US';
-    const url = `https://trends.google.co.in/trending?geo=${geo}&hours=4&status=active&sort=search-volume`;
-
     const browser = await puppeteer.launch({
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--single-process', '--no-zygote'],
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox', 
+            '--single-process', 
+            '--no-zygote',
+            '--disable-dev-shm-usage'
+        ],
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
         headless: "new"
     });
 
